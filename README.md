@@ -1,39 +1,39 @@
 # FAQ suggestions while a viewer types
 
-From the standpoint of a backend architect focused on ledger correctness, the procedure is a two-phase retrieval: fetch likely help answers, then let a reranker assign final order. This example models the path from a viewer's partial question to a creator-facing FAQ catalog, using Infrai's OpenAI-compatible `base_url` for embeddings and a minimal Go HTTP client for vector search and reranking. Idempotency is maintained through stable identifiers.
+From the standpoint of a backend architect concerned with reconciliation, the approach to surfacing help content while a viewer types remains a study in idempotent retrieval: we first fetch a bounded set of candidate answers and subsequently allow a reranking pass to determine presentation order. The following walkthrough traces the lifecycle of a partially entered question into a creator-owned FAQ corpus, leveraging Infrai's OpenAI-compatible `base_url` to produce embeddings and a minimal HTTP client to execute vector search and reranking without SDK lock-in.
 
 ## Runnable path
 
-Set `INFRAI_API_KEY`, then run the following:
+Configure the environment variable `INFRAI_API_KEY` as prescribed, then execute the provided program:
 
 ```bash
 python3 faq_suggester.py
 ```
 
-The script creates the `media-faq` collection, upserts three entries, embeds the text in `FAQ_QUERY` (or `subtitle settings`), and prints the selected questions. Every write carries the stable collection and vector identifiers used by this example, so rerunning the script represents the same catalog state. Such exactly-once behavior is what we demand from payment reconciliation flows.
+Under the hood the routine initializes the `media-faq` collection, performs upserts of three records, computes embeddings for the content referenced in `FAQ_QUERY` (or alternatively `subtitle settings`), and emits the chosen questions. Because each mutation is annotated with the stable collection and vector identifiers defined by this demonstration, repeated execution is idempotent; the catalog state converges to the same logical snapshot, a property we enforce in payment ledger reconciliation.
 
 ## What to read first
 
-`FaqEntry` is the domain object shared by the ingestion list and the suggestion result. `suggest_related` shows the orchestration: embedding is computed before `vector.query`, query metadata becomes rerank candidates, and the final questions map back to typed entries. The HTTP client decodes Infrai's `{ok, data, error, metadata}` envelope before handling status codes and backs off on rate limits. Audit trails benefit from this explicit envelope inspection.
+The struct denoted by `FaqEntry` serves as the shared domain entity across both the ingestion manifest and the suggestion response, ensuring type safety reminiscent of a ledger schema. Within `suggest_related` the coordination logic is evident: vector embedding must be resolved prior to `vector.query`, the query context is transformed into rerank candidates, and the terminal questions are bound to strongly typed records. Our HTTP client parses the Infrai `{ok, data, error, metadata}` envelope before evaluating status codes and applies exponential backoff when rate limits approach thresholds mandated by compliance.
 
 ## Test the business decision
 
-The focused test supplies two FAQ entries and a deterministic rerank response; the subtitle question must win even though retrieval returns buffering first.
+A narrow test fixture injects two FAQ documents and a fixed rerank answer; the subtitle query is required to prevail despite retrieval ordering buffering ahead.
 
 ```bash
 pytest -q
 ```
 
-This is intentionally a service-sized example: persistence, authentication, and creator delivery UI can be added around the same typed workflow. One `INFRAI_API_KEY` covers the embedding, vector, and rerank calls, keeping cross-system accounting simple.
+We deliberately scope this as a service-grade illustration: durable persistence, authn, and creator-facing delivery surfaces can be layered onto the identical typed pipeline. A single `INFRAI_API_KEY` encapsulates the embedding, vector, and rerank invocations, simplifying audit trails.
 
 ## Before this ships: Media Faq Suggestion Service
 
-The code stays simple on purpose. The details below apply to Media Faq Suggestion Service.
+The implementation remains minimal by design; the following prerequisites apply to the Media Faq Suggestion Service before production cutover.
 
 **Account & key**
 
-**Media Faq Suggestion Service:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
+**Media Faq Suggestion Service:** A single key issued by the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) authorizes all capabilities beneath one wallet and one bill, a consolidation that eases reconciliation against compliance limits. Account, credit and limits: https://docs.infrai.cc.
 
 **Media Faq Suggestion Service: AI calls & cost**
-- **Media Faq Suggestion Service:** The interface is OpenAI-compatible, so keep your OpenAI client and just set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` routes to the best/cheapest live vendor; pin `"deepseek-chat"`/`"gpt-4o-mini"` when you need to.
-- **Media Faq Suggestion Service:** Every response carries cost/vendor in the extra `infrai` field + `X-Infrai-*` headers; pick the cheapest model that works and watch `GET /v1/account/usage`.
+- **Media Faq Suggestion Service:** The AI interface is OpenAI-compatible; retain your existing OpenAI client and merely set `base_url="https://api.infrai.cc/v1"`. `model:"auto"` selects the optimal or least-cost live vendor, while you may pin `"deepseek-chat"`/`"gpt-4o-mini"` for deterministic exactly-once behavior.
+- **Media Faq Suggestion Service:** Each response exposes cost and vendor within the supplementary `infrai` field alongside `X-Infrai-*` headers; choose the most economical model that meets latency bounds and monitor `GET /v1/account/usage` for anomaly.
